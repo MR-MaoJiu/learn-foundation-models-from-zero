@@ -1,0 +1,16 @@
+# Windows + NVIDIA GPU 推荐使用这个依赖文件。
+#
+# 普通 `pip install torch` 有时会装到 CPU 版 PyTorch。
+# 这里明确指定 PyTorch 官方 CUDA 13.0 wheel 源，并锁定 CUDA 版 torch。
+#
+# 安装命令：
+#   python -m pip install -r requirements-cuda.txt
+
+--extra-index-url https://download.pytorch.org/whl/cu130
+
+torch==2.12.1+cu130
+numpy>=1.24
+tokenizers>=0.15
+tqdm>=4.66
+datasets>=2.18
+pillow>=10.0

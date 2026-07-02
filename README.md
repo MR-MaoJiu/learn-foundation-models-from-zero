@@ -98,6 +98,7 @@ learn-foundation-models-from-zero/
 │
 ├─ .gitignore
 ├─ README.md
+├─ requirements-cuda.txt             # Windows + NVIDIA GPU 环境推荐，用 CUDA 版 PyTorch
 └─ requirements.txt
 ```
 
@@ -158,10 +159,24 @@ source .venv/bin/activate
 安装依赖：
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 如果你的系统里 `python` 命令不可用，可以把下面命令里的 `python` 换成 `python3`。
+
+如果你是 Windows + NVIDIA 显卡，推荐安装 CUDA 版 PyTorch：
+
+```bash
+python -m pip install -r requirements-cuda.txt
+```
+
+安装后可以检查 CUDA 是否可用：
+
+```bash
+python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no cuda')"
+```
+
+如果输出里 `torch.cuda.is_available()` 是 `True`，并且能看到显卡名称，训练脚本里的 `device: auto` 就会自动使用 CUDA。
 
 ## 学习线 1：文本 LLM
 
