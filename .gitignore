@@ -1,0 +1,24 @@
+﻿__pycache__/
+*.py[cod]
+.venv/
+venv/
+.idea/
+
+# Generated training artifacts. They can be recreated from scripts.
+artifacts/
+checkpoints/
+data/text/processed/
+data/text/raw/open_zh_wikipedia.txt
+data/text/raw/open_zh_wikipedia.source.md
+data/vision/mnist/
+data/multimodal/mnist_pairs/
+
+# Large model/data files.
+*.bin
+*.pt
+*.pth
+*.safetensors
+
+# Local logs.
+runs/
+*.log
