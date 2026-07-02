@@ -36,7 +36,25 @@ from tokenizers.trainers import BpeTrainer
 # <unk>：遇到未知 token 时使用。
 # <bos>：begin of sequence，表示一段文本开始。
 # <eos>：end of sequence，表示一段文本结束。
-SPECIAL_TOKENS = ["<pad>", "<unk>", "<bos>", "<eos>"]
+#
+# 下面 4 个 ChatML 风格 token 用来标记聊天角色和单轮结束。
+# 主流聊天模型通常不会只靠“用户：/助手：”这类普通文字判断角色，
+# 而是会使用清晰、稳定、不容易和正文混淆的特殊边界。
+#
+# <|system|>：系统指令，规定助手整体行为。
+# <|user|>：用户输入。
+# <|assistant|>：助手回复开始。
+# <|end|>：一条消息结束。生成时遇到它就可以停止当前轮回复。
+SPECIAL_TOKENS = [
+    "<pad>",
+    "<unk>",
+    "<bos>",
+    "<eos>",
+    "<|system|>",
+    "<|user|>",
+    "<|assistant|>",
+    "<|end|>",
+]
 
 
 def train_bpe_tokenizer(
@@ -112,6 +130,10 @@ class LLMTokenizer:
         self.unk_id = self.tokenizer.token_to_id("<unk>")
         self.bos_id = self.tokenizer.token_to_id("<bos>")
         self.eos_id = self.tokenizer.token_to_id("<eos>")
+        self.chat_system_id = self.tokenizer.token_to_id("<|system|>")
+        self.chat_user_id = self.tokenizer.token_to_id("<|user|>")
+        self.chat_assistant_id = self.tokenizer.token_to_id("<|assistant|>")
+        self.chat_end_id = self.tokenizer.token_to_id("<|end|>")
 
     @property
     def vocab_size(self) -> int:
@@ -146,7 +168,11 @@ class LLMTokenizer:
 
         return ids
 
-    def decode(self, ids: list[int]) -> str:
-        """把 token id 列表转换回文本。"""
+    def decode(self, ids: list[int], skip_special_tokens: bool = True) -> str:
+        """把 token id 列表转换回文本。
 
-        return self.tokenizer.decode(ids)
+        普通展示时通常跳过特殊 token。
+        聊天推理内部会保留特殊 token，这样才能看到 `<|end|>` 并正确截断。
+        """
+
+        return self.tokenizer.decode(ids, skip_special_tokens=skip_special_tokens)

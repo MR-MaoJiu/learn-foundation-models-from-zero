@@ -184,6 +184,7 @@ python -c "import torch; print(torch.__version__); print(torch.cuda.is_available
 
 - [docs/llm/from_zero_principles.md](docs/llm/from_zero_principles.md)
 - [docs/llm/implementation_guide.md](docs/llm/implementation_guide.md)
+- [docs/llm/full_workflow.md](docs/llm/full_workflow.md)
 
 可选下载开源中文语料：
 
@@ -191,21 +192,10 @@ python -c "import torch; print(torch.__version__); print(torch.cuda.is_available
 python scripts/llm/download_open_chinese_corpus.py --out data/text/raw/open_zh_wikipedia.txt --max-docs 200
 ```
 
-可选准备日常生活对话语料：
-
-```bash
-python scripts/llm/download_daily_dialogue_corpus.py --out data/text/raw/daily_life_dialogue.txt --sources synthetic --max-synthetic 30000
-```
-
-这个命令会写入原创简体中文日常生活对话，覆盖买菜、做饭、通勤、天气、看病、租房、学习、工作沟通等场景。
-生成器会混合多种对话逻辑：普通交流、计划安排、问题排查、临时变更、情绪安抚、选择比较。
-
-脚本也支持可选英文开源对话源 `dailydialog` 和 `everyday`，但如果你只想训练简体中文，建议只使用 `synthetic`。
-
 训练 tokenizer：
 
 ```bash
-python scripts/llm/train_tokenizer.py --input data/text/raw/tiny_zh_corpus.txt data/text/raw/daily_life_dialogue.txt --out artifacts/llm/tokenizer --vocab-size 1024 --min-frequency 1
+python scripts/llm/train_tokenizer.py --input data/text/raw/tiny_zh_corpus.txt data/text/raw/sft_chat_zh.jsonl --out artifacts/llm/tokenizer --vocab-size 1024 --min-frequency 1
 ```
 
 `--vocab-size 1024` 表示目标词表大小。tiny 语料很小，如果不加 `--min-frequency 1`，实际训练出来的词表可能小于 1024。
@@ -213,7 +203,7 @@ python scripts/llm/train_tokenizer.py --input data/text/raw/tiny_zh_corpus.txt d
 准备训练数据：
 
 ```bash
-python scripts/llm/prepare_data.py --input data/text/raw/tiny_zh_corpus.txt data/text/raw/daily_life_dialogue.txt --tokenizer artifacts/llm/tokenizer/tokenizer.json --out data/text/processed --val-ratio 0.1
+python scripts/llm/prepare_data.py --input data/text/raw/tiny_zh_corpus.txt --tokenizer artifacts/llm/tokenizer/tokenizer.json --out data/text/processed --val-ratio 0.1
 ```
 
 训练 debug 小模型：
@@ -233,6 +223,21 @@ python scripts/llm/train.py --config configs/llm/debug.json
 
 ```bash
 python scripts/llm/generate.py --checkpoint checkpoints/llm/debug/last.pt --prompt "语言模型的目标是"
+```
+
+如果你想模拟真实工作里的“训练到部署”完整链路，可以运行：
+
+```bash
+python scripts/llm/run_chat_workflow.py
+```
+
+它会串起 SFT 数据校验、tokenizer、预训练、SFT、评估和导出。
+聊天 SFT 使用 OpenAI/GPT 常见的 `messages` JSONL 格式，内部训练模板使用 ChatML 风格的 `<|system|>`、`<|user|>`、`<|assistant|>`、`<|end|>` 特殊 token。
+
+导出后启动本地 HTTP 服务：
+
+```bash
+python scripts/llm/serve_chat.py --model-dir deployments/llm/chat_debug
 ```
 
 ## 学习线 2：视觉模型

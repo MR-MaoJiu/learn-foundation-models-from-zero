@@ -7,7 +7,10 @@ venv/
 # Generated training artifacts. They can be recreated from scripts.
 artifacts/
 checkpoints/
+deployments/
 data/text/processed/
+data/text/raw/daily_life_dialogue.txt
+data/text/raw/daily_life_dialogue.source.md
 data/text/raw/open_zh_wikipedia.txt
 data/text/raw/open_zh_wikipedia.source.md
 data/vision/mnist/

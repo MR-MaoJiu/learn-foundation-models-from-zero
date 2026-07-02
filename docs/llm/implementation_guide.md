@@ -46,6 +46,15 @@
 
 把 token id 列表还原成文本。
 
+聊天相关特殊 token：
+
+- `<|system|>`：系统指令开始。
+- `<|user|>`：用户消息开始。
+- `<|assistant|>`：助手回复开始。
+- `<|end|>`：一条消息结束。
+
+这些 token 会被注册进 tokenizer，避免模型把角色边界当成普通正文片段。
+
 ## `src/foundation_models/llm/data.py`
 
 `read_text_files(paths)`
@@ -71,6 +80,38 @@
 `BinaryTokenDataset.get_batch(batch_size, device)`
 
 随机抽取一批训练样本。返回 `x` 和 `y`，其中 `y` 是 `x` 向右移动一个 token 的答案。
+
+## `src/foundation_models/llm/chat.py`
+
+`render_chat_messages(messages, add_generation_prompt)`
+
+把 OpenAI/GPT 风格的 `messages` 渲染成 ChatML 文本。SFT、生成、评估和部署都复用这套模板，避免训练和推理格式不一致。
+
+`build_chat_prompt(prompt)`
+
+把普通用户输入包装成 system + user + assistant generation prompt。
+
+`generate_chat_reply(...)`
+
+生成一轮助手回复。它会在生成时使用 `<|end|>` 和 `<eos>` 作为停止 token，减少模型继续生成下一轮用户的情况。
+
+## `src/foundation_models/llm/sft_data.py`
+
+`read_sft_jsonl(path)`
+
+读取 SFT JSONL。推荐格式是：
+
+```json
+{"messages":[{"role":"system","content":"..."},{"role":"user","content":"..."},{"role":"assistant","content":"..."}]}
+```
+
+`validate_messages(messages)`
+
+检查 `system/user/assistant` 顺序是否适合 SFT：system 只能第一条，user 和 assistant 要交替，最后一条必须是 assistant。
+
+`ChatSFTDataset.encode_example(example)`
+
+把一条 SFT 样本转成 `input_ids` 和 `labels`。prompt 部分的 labels 会设置成 `-100`，不参与 loss；最后 assistant 回答和 `<|end|>` 会参与 loss。
 
 ## `src/foundation_models/llm/model.py`
 

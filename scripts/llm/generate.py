@@ -25,16 +25,19 @@ import argparse
 from pathlib import Path
 import sys
 
-import torch
-
 
 # 找到项目根目录，并把 src 加入 Python 导入路径。
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from foundation_models.llm.config import model_config_from_dict
-from foundation_models.llm.model import GPT
-from foundation_models.llm.tokenizer import LLMTokenizer
+from foundation_models.llm.chat import (
+    build_chat_prompt,
+    chat_stop_token_ids,
+    generate_chat_reply,
+    generate_text,
+    load_chat_model,
+    trim_assistant_reply,
+)
 from foundation_models.llm.utils import choose_device
 
 
@@ -66,8 +69,32 @@ def main() -> None:
     # 模型会接着它往后写。
     parser.add_argument(
         "--prompt",
-        required=True,
+        default="",
         help="Prompt text.",
+    )
+
+    # 默认用聊天模式：把普通输入包装成 ChatML，并且只显示助手回复。
+    # 如果你想保留原来的纯续写行为，可以使用 --mode completion。
+    parser.add_argument(
+        "--mode",
+        choices=["chat", "completion"],
+        default="chat",
+        help="chat wraps the prompt as a user turn; completion continues raw text.",
+    )
+
+    # 连续对话模式。
+    # 开启后，脚本会保留本轮终端中的历史上下文。
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Start an interactive chat loop.",
+    )
+
+    # 调试时可以打开，查看真正喂给模型和模型完整续写出的内容。
+    parser.add_argument(
+        "--show-full",
+        action="store_true",
+        help="Print the full generated text instead of only the assistant reply in chat mode.",
     )
 
     # 最多生成多少个新 token。
@@ -107,57 +134,59 @@ def main() -> None:
     # 选择 CPU 或 GPU。
     device = choose_device(args.device)
 
-    # 加载 checkpoint。
-    #
-    # map_location=device 的意思是：
-    # checkpoint 里的张量加载到当前选择的设备上。
-    # 例如你用 CPU 生成，就加载到 CPU。
-    checkpoint = torch.load(args.checkpoint, map_location=device)
-    raw_config = checkpoint["config"]
-
-    # 加载 tokenizer。
+    # 加载 checkpoint、tokenizer 和模型。
     # 必须使用训练时同一个 tokenizer，否则 token id 对不上。
-    tokenizer = LLMTokenizer(raw_config["training"]["tokenizer_path"])
+    model, tokenizer, _ = load_chat_model(args.checkpoint, device)
 
-    # 根据 checkpoint 里的模型配置，重新创建同样结构的模型。
-    model_config = model_config_from_dict(raw_config["model"])
-    model = GPT(model_config).to(device)
+    if args.interactive:
+        history = ""
+        print("进入对话模式。输入 exit 或 quit 结束。")
+        while True:
+            try:
+                user_text = input("用户：").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
 
-    # 把训练好的参数填进模型。
-    model.load_state_dict(checkpoint["model"])
+            if user_text.lower() in {"exit", "quit"}:
+                break
+            if not user_text:
+                continue
 
-    # eval 模式会关闭 dropout。
-    # 生成文本时不希望 dropout 引入额外随机性。
-    model.eval()
+            reply, history = generate_chat_reply(
+                model=model,
+                tokenizer=tokenizer,
+                user_text=user_text,
+                history=history,
+                device=device,
+                max_new_tokens=args.max_new_tokens,
+                temperature=args.temperature,
+                top_k=args.top_k,
+            )
+            print(f"助手：{reply}")
+        return
 
-    # prompt 文本 -> token id。
-    # add_bos=True 会在开头加 <bos>，表示序列开始。
-    input_ids = tokenizer.encode(args.prompt, add_bos=True)
+    if args.mode == "chat":
+        prompt_text = build_chat_prompt(args.prompt)
+    else:
+        prompt_text = args.prompt
 
-    # 转成 PyTorch Tensor。
-    #
-    # tokenizer.encode 返回的是一维列表：
-    #   [time]
-    #
-    # 模型需要 batch 维度，所以外面套一层：
-    #   [[time]] -> [batch=1, time]
-    x = torch.tensor([input_ids], dtype=torch.long, device=device)
+    full_text = generate_text(
+        model=model,
+        tokenizer=tokenizer,
+        prompt_text=prompt_text,
+        device=device,
+        max_new_tokens=args.max_new_tokens,
+        temperature=args.temperature,
+        top_k=args.top_k,
+        stop_token_ids=chat_stop_token_ids(tokenizer) if args.mode == "chat" else None,
+    )
 
-    # 生成时不训练，所以不需要梯度。
-    # no_grad 可以减少内存占用，也更快。
-    with torch.no_grad():
-        output = model.generate(
-            input_ids=x,
-            max_new_tokens=args.max_new_tokens,
-            temperature=args.temperature,
-            top_k=args.top_k,
-        )
-
-    # output 形状是 [1, total_time]。
-    # output[0] 取出第一个样本。
-    # tolist() 把 Tensor 变回 Python list。
-    # tokenizer.decode 把 token id 转回字符串。
-    print(tokenizer.decode(output[0].tolist()))
+    if args.mode == "chat" and not args.show_full:
+        print(trim_assistant_reply(full_text, prompt_text))
+    else:
+        # completion 模式保留原来的行为：输出完整文本。
+        print(full_text)
 
 
 if __name__ == "__main__":

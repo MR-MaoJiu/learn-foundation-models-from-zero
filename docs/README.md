@@ -8,6 +8,7 @@
 
 - `docs/llm/from_zero_principles.md`
 - `docs/llm/implementation_guide.md`
+- `docs/llm/full_workflow.md`
 
 你会学到：
 
@@ -15,6 +16,7 @@
 - token 如何变成 embedding。
 - Transformer 为什么能建模上下文。
 - GPT 类模型为什么训练目标是预测下一个 token。
+- 一个聊天模型从训练、SFT、评估到部署的完整工作流。
 
 ## 2. Vision 视觉模型
 

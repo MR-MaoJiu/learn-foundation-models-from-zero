@@ -447,6 +447,7 @@ class GPT(nn.Module):
             loss = F.cross_entropy(
                 logits.view(-1, logits.size(-1)),
                 labels.view(-1),
+                ignore_index=-100,
             )
 
         return logits, loss
@@ -458,6 +459,7 @@ class GPT(nn.Module):
         max_new_tokens: int,
         temperature: float = 0.8,
         top_k: int = 50,
+        stop_token_ids: Optional[set[int]] = None,
     ) -> torch.Tensor:
         """根据 prompt 生成新 token。
 
@@ -475,6 +477,10 @@ class GPT(nn.Module):
         top_k：
         - 只从分数最高的 k 个 token 里采样。
         - 可以避免模型从很离谱的 token 里随机选。
+
+        stop_token_ids：
+        - 如果生成到这些 token，就提前停止。
+        - 聊天部署时通常会把 <|end|> 和 <eos> 放进这里，避免模型继续写下一轮用户。
         """
 
         for _ in range(max_new_tokens):
@@ -518,6 +524,9 @@ class GPT(nn.Module):
 
             # 把新 token 拼到序列末尾。
             input_ids = torch.cat([input_ids, next_id], dim=1)
+
+            if stop_token_ids and all(token_id.item() in stop_token_ids for token_id in next_id.view(-1)):
+                break
 
         return input_ids
 
