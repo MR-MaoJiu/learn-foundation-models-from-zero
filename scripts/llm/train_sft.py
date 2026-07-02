@@ -21,7 +21,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from foundation_models.llm.config import load_json_config, model_config_from_dict
 from foundation_models.llm.model import GPT
-from foundation_models.llm.sft_data import ChatSFTDataset, read_sft_jsonl, split_examples
+from foundation_models.llm.sft_data import ChatSFTDataset, SFTExample, read_sft_jsonl, split_examples
 from foundation_models.llm.tokenizer import LLMTokenizer
 from foundation_models.llm.utils import choose_device, choose_dtype, cosine_lr, save_checkpoint, set_seed
 
@@ -37,6 +37,20 @@ def estimate_loss(model: GPT, dataset: ChatSFTDataset, batch_size: int, eval_ite
                 losses.append(loss.item())
     model.train()
     return sum(losses) / max(1, len(losses))
+
+
+def load_sft_examples(paths: str | list[str]) -> list[SFTExample]:
+    """读取一个或多个 SFT JSONL 文件。"""
+
+    if isinstance(paths, str):
+        paths = [paths]
+
+    examples: list[SFTExample] = []
+    for path in paths:
+        examples.extend(read_sft_jsonl(path))
+    if not examples:
+        raise ValueError("No SFT examples loaded.")
+    return examples
 
 
 def main() -> None:
@@ -83,7 +97,7 @@ def main() -> None:
     else:
         print("No base checkpoint provided; SFT starts from random initialization.")
 
-    examples = read_sft_jsonl(train_cfg["sft_jsonl"])
+    examples = load_sft_examples(train_cfg["sft_jsonl"])
     train_examples, val_examples = split_examples(examples, train_cfg["val_ratio"], train_cfg["seed"])
     train_data = ChatSFTDataset(train_examples, tokenizer, model_config.max_seq_len)
     val_data = ChatSFTDataset(val_examples, tokenizer, model_config.max_seq_len)

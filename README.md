@@ -233,6 +233,7 @@ python scripts/llm/run_chat_workflow.py
 
 它会串起 SFT 数据校验、tokenizer、预训练、SFT、评估和导出。
 聊天 SFT 使用 OpenAI/GPT 常见的 `messages` JSONL 格式，内部训练模板使用 ChatML 风格的 `<|system|>`、`<|user|>`、`<|assistant|>`、`<|end|>` 特殊 token。
+默认会通过 [build_sft_chat_corpus.py](scripts/llm/build_sft_chat_corpus.py) 生成 2000 条中文 SFT 样本，覆盖日常沟通、学习解释、代码排查、写作润色、计划安排、安全边界和多轮上下文。
 
 导出后启动本地 HTTP 服务：
 

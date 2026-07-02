@@ -57,6 +57,22 @@ data/text/raw/tiny_zh_corpus.txt
 data/text/raw/sft_chat_zh.jsonl
 ```
 
+默认 SFT 文件可以由脚本重建：
+
+```bash
+python scripts/llm/build_sft_chat_corpus.py --out data/text/raw/sft_chat_zh.jsonl --count 2000 --seed 42
+```
+
+这会生成约 2000 条中文 `messages` 样本，覆盖：
+
+- 日常沟通：购物、做饭、通勤、睡眠、旅行、家庭沟通。
+- 学习解释：tokenizer、embedding、attention、loss、SFT、checkpoint。
+- 工程排查：CUDA、NaN、checkpoint/tokenizer 不匹配、重复生成。
+- 写作润色：通知、礼貌表达、总结改写。
+- 计划安排：学习、技术分享、训练小模型、找工作。
+- 安全边界：实时天气、医疗、金融、隐私和不确定信息。
+- 多轮上下文：至少两轮以上的追问和承接。
+
 推荐 SFT JSONL 每行长这样：
 
 ```json
@@ -76,6 +92,15 @@ data/text/raw/sft_chat_zh.jsonl
 ```bash
 python scripts/llm/validate_sft_data.py --input data/text/raw/sft_chat_zh.jsonl --show-template
 ```
+
+可选导入开源英文日常对话：
+
+```bash
+python scripts/llm/import_open_sft_corpus.py --source everyday --out data/text/raw/sft_open_everyday.jsonl --max-rows 2000
+python scripts/llm/validate_sft_data.py --input data/text/raw/sft_open_everyday.jsonl --show-template
+```
+
+当前支持 `HuggingFaceTB/everyday-conversations-llama3.1-2k`。它的 Hugging Face 页面展示的是多轮 role/content messages，覆盖 everyday topics 和 basic science。使用前请按你的用途再次确认数据集页面的许可和限制。
 
 真实工作里，这一步还会做数据清洗、去重、敏感信息过滤、许可证检查和数据版本记录。
 
@@ -133,6 +158,15 @@ python scripts/llm/generate.py --checkpoint checkpoints/llm/debug/last.pt --prom
 
 ```bash
 python scripts/llm/train_sft.py --config configs/llm/sft_debug.json
+```
+
+如果你导入了开源数据，可以在 `configs/llm/sft_debug.json` 里把 `sft_jsonl` 改成数组：
+
+```json
+"sft_jsonl": [
+  "data/text/raw/sft_chat_zh.jsonl",
+  "data/text/raw/sft_open_everyday.jsonl"
+]
 ```
 
 SFT 的关键区别：

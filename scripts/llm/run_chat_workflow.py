@@ -72,6 +72,19 @@ def main() -> None:
     run_command(
         [
             args.python,
+            "scripts/llm/build_sft_chat_corpus.py",
+            "--out",
+            "data/text/raw/sft_chat_zh.jsonl",
+            "--count",
+            "2000",
+            "--seed",
+            "42",
+        ]
+    )
+
+    run_command(
+        [
+            args.python,
             "scripts/llm/validate_sft_data.py",
             "--input",
             "data/text/raw/sft_chat_zh.jsonl",

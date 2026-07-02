@@ -5,7 +5,7 @@
 当前自带文件：
 
 - `tiny_zh_corpus.txt`：原创中文小语料，只适合跑通流程。
-- `sft_chat_zh.jsonl`：原创中文 SFT 样例数据，采用 OpenAI/GPT 常见的 `messages` JSONL 格式，用来模拟“用户问题 -> 助手回答”的监督微调流程。
+- `sft_chat_zh.jsonl`：原创中文 SFT 数据，采用 OpenAI/GPT 常见的 `messages` JSONL 格式，用来模拟“用户问题 -> 助手回答”的监督微调流程。默认由 `scripts/llm/build_sft_chat_corpus.py` 生成 2000 条。
 
 可选生成文件：
 
@@ -22,6 +22,35 @@ python scripts/llm/prepare_data.py --input data/text/raw/tiny_zh_corpus.txt data
 ```
 
 聊天能力不要靠普通 `.txt` 对话转写来训练。请把聊天样本整理成下面的 `messages` JSONL，然后通过 SFT 训练。
+
+## 生成更多 SFT 聊天数据
+
+默认生成 2000 条中文 SFT：
+
+```bash
+python scripts/llm/build_sft_chat_corpus.py --out data/text/raw/sft_chat_zh.jsonl --count 2000 --seed 42
+```
+
+可以继续放大：
+
+```bash
+python scripts/llm/build_sft_chat_corpus.py --out data/text/raw/sft_chat_zh.jsonl --count 10000 --seed 42
+```
+
+它会覆盖日常沟通、学习解释、代码排查、写作润色、计划安排、安全边界和多轮追问。生成后一定先校验格式：
+
+```bash
+python scripts/llm/validate_sft_data.py --input data/text/raw/sft_chat_zh.jsonl --show-template
+```
+
+可选导入开源英文日常对话：
+
+```bash
+python scripts/llm/import_open_sft_corpus.py --source everyday --out data/text/raw/sft_open_everyday.jsonl --max-rows 2000
+python scripts/llm/validate_sft_data.py --input data/text/raw/sft_open_everyday.jsonl --show-template
+```
+
+开源数据使用前请查看对应数据集页面的许可和用途限制。
 
 ## 好语料的特点
 
