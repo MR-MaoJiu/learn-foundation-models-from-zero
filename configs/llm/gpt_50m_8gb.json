@@ -1,7 +1,7 @@
 ﻿{
   "model": {
-    "vocab_size": 8000,
-    "max_seq_len": 128,
+    "vocab_size": 1024,
+    "max_seq_len": 1024,
     "n_layer": 12,
     "n_head": 8,
     "n_embd": 512,
@@ -14,8 +14,8 @@
     "train_bin": "data/text/processed/train.bin",
     "val_bin": "data/text/processed/val.bin",
     "output_dir": "checkpoints/llm/gpt_50m_8gb",
-    "batch_size": 64,
-    "micro_batch_size": 4,
+    "batch_size": 32,
+    "micro_batch_size": 2,
     "max_steps": 2000,
     "learning_rate": 0.0004,
     "min_learning_rate": 0.00004,

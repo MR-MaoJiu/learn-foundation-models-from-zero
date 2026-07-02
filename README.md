@@ -191,16 +191,29 @@ python -c "import torch; print(torch.__version__); print(torch.cuda.is_available
 python scripts/llm/download_open_chinese_corpus.py --out data/text/raw/open_zh_wikipedia.txt --max-docs 200
 ```
 
+可选准备日常生活对话语料：
+
+```bash
+python scripts/llm/download_daily_dialogue_corpus.py --out data/text/raw/daily_life_dialogue.txt --sources synthetic --max-synthetic 30000
+```
+
+这个命令会写入原创简体中文日常生活对话，覆盖买菜、做饭、通勤、天气、看病、租房、学习、工作沟通等场景。
+生成器会混合多种对话逻辑：普通交流、计划安排、问题排查、临时变更、情绪安抚、选择比较。
+
+脚本也支持可选英文开源对话源 `dailydialog` 和 `everyday`，但如果你只想训练简体中文，建议只使用 `synthetic`。
+
 训练 tokenizer：
 
 ```bash
-python scripts/llm/train_tokenizer.py --input data/text/raw/tiny_zh_corpus.txt --out artifacts/llm/tokenizer --vocab-size 2000
+python scripts/llm/train_tokenizer.py --input data/text/raw/tiny_zh_corpus.txt data/text/raw/daily_life_dialogue.txt --out artifacts/llm/tokenizer --vocab-size 1024 --min-frequency 1
 ```
+
+`--vocab-size 1024` 表示目标词表大小。tiny 语料很小，如果不加 `--min-frequency 1`，实际训练出来的词表可能小于 1024。
 
 准备训练数据：
 
 ```bash
-python scripts/llm/prepare_data.py --input data/text/raw/tiny_zh_corpus.txt --tokenizer artifacts/llm/tokenizer/tokenizer.json --out data/text/processed --val-ratio 0.1
+python scripts/llm/prepare_data.py --input data/text/raw/tiny_zh_corpus.txt data/text/raw/daily_life_dialogue.txt --tokenizer artifacts/llm/tokenizer/tokenizer.json --out data/text/processed --val-ratio 0.1
 ```
 
 训练 debug 小模型：
@@ -208,6 +221,13 @@ python scripts/llm/prepare_data.py --input data/text/raw/tiny_zh_corpus.txt --to
 ```bash
 python scripts/llm/train.py --config configs/llm/debug.json
 ```
+
+当前 LLM 配置里的上下文窗口：
+
+- `configs/llm/debug.json`：`max_seq_len = 1024`，适合学习较长上下文的完整数据流。
+- `configs/llm/gpt_50m_8gb.json`：`max_seq_len = 1024`，适合 8GB 显存显卡上学习较长上下文训练。
+
+`max_seq_len` 越大，模型一次能看到的上下文越长，但显存占用也会上升很快。因为注意力会计算 token 两两之间的关系，所以长度从 128 增加到 1024，不只是 8 倍开销，注意力部分接近 64 倍开销。
 
 生成文本：
 

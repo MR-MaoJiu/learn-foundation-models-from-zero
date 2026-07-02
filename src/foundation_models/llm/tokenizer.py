@@ -43,6 +43,7 @@ def train_bpe_tokenizer(
     input_files: Iterable[str | Path],
     out_dir: str | Path,
     vocab_size: int,
+    min_frequency: int = 2,
 ) -> Path:
     """训练 byte-level BPE tokenizer，并保存 `tokenizer.json`。
 
@@ -50,6 +51,7 @@ def train_bpe_tokenizer(
     - input_files：训练 tokenizer 的文本文件。
     - out_dir：输出目录。
     - vocab_size：词表最大大小。
+    - min_frequency：片段至少出现多少次才允许被合并进词表。
 
     注意：
     tokenizer 的词表不是越大越好。
@@ -72,7 +74,7 @@ def train_bpe_tokenizer(
     # BpeTrainer 负责真正学习词表。
     trainer = BpeTrainer(
         vocab_size=vocab_size,
-        min_frequency=2,
+        min_frequency=min_frequency,
         special_tokens=SPECIAL_TOKENS,
         show_progress=True,
     )

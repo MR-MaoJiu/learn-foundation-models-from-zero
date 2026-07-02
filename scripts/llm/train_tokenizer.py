@@ -46,7 +46,7 @@ def main() -> None:
 
     你在终端里运行：
 
-        python scripts/llm/train_tokenizer.py --input data/text/raw/tiny_zh_corpus.txt --out artifacts/llm/tokenizer --vocab-size 2000
+        python scripts/llm/train_tokenizer.py --input data/text/raw/tiny_zh_corpus.txt --out artifacts/llm/tokenizer --vocab-size 1024 --min-frequency 1
 
     argparse 会把这些命令行参数解析成 args。
     """
@@ -79,12 +79,24 @@ def main() -> None:
     # - 单个 token 能表示更长的片段。
     # - 但模型输出层也会更大，参数更多。
     #
-    # 小语料即使设置 8000，也可能训练不出完整 8000 个 token。
+    # 小语料即使设置很大的词表，也可能训练不出完整数量的 token。
     parser.add_argument(
         "--vocab-size",
         type=int,
-        default=2000,
+        default=1024,
         help="Vocabulary size.",
+    )
+
+    # --min-frequency 控制 BPE 合并片段的最低出现次数。
+    #
+    # 默认 2 更稳，不容易把只出现一次的偶然片段合并进词表。
+    # 如果你用的是非常小的 tiny_zh_corpus.txt，并且想尽量接近 1024 词表，
+    # 可以传 --min-frequency 1。
+    parser.add_argument(
+        "--min-frequency",
+        type=int,
+        default=2,
+        help="Minimum frequency for BPE merges. Use 1 for very small corpora.",
     )
 
     args = parser.parse_args()
@@ -95,6 +107,7 @@ def main() -> None:
         input_files=args.input,
         out_dir=args.out,
         vocab_size=args.vocab_size,
+        min_frequency=args.min_frequency,
     )
 
     print(f"Tokenizer saved to: {output}")
