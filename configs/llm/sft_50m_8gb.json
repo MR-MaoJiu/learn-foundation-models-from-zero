@@ -1,0 +1,34 @@
+{
+  "model": {
+    "vocab_size": 2048,
+    "max_seq_len": 1024,
+    "n_layer": 12,
+    "n_head": 8,
+    "n_embd": 512,
+    "intermediate_size": 2048,
+    "dropout": 0.1,
+    "rope_theta": 10000.0
+  },
+  "training": {
+    "base_checkpoint": "checkpoints/llm/gpt_50m_8gb/last.pt",
+    "tokenizer_path": "artifacts/llm/tokenizer/tokenizer.json",
+    "sft_jsonl": "data/text/raw/sft_chat_zh.jsonl",
+    "output_dir": "checkpoints/llm/sft_50m_8gb",
+    "batch_size": 16,
+    "micro_batch_size": 2,
+    "max_steps": 1000,
+    "learning_rate": 0.00008,
+    "min_learning_rate": 0.000008,
+    "warmup_steps": 50,
+    "weight_decay": 0.01,
+    "grad_clip": 1.0,
+    "eval_interval": 100,
+    "eval_iters": 10,
+    "log_interval": 10,
+    "save_interval": 250,
+    "val_ratio": 0.2,
+    "seed": 42,
+    "device": "auto",
+    "dtype": "auto"
+  }
+}

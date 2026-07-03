@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 """
-SFT 数据处理。
+SFT data utilities.
 
-推荐语料格式采用 OpenAI/GPT 常见 JSONL：
+The recommended corpus format is OpenAI/GPT-style JSONL:
 
     {"messages": [
       {"role": "system", "content": "..."},
@@ -11,8 +11,9 @@ SFT 数据处理。
       {"role": "assistant", "content": "..."}
     ]}
 
-训练时会把 messages 渲染成 ChatML。最后一条 assistant 消息是监督目标，
-前面的消息是上下文 prompt，并被 mask 成 `IGNORE_INDEX`，不参与 loss。
+During training, each row is rendered into ChatML. All prompt tokens are
+masked with `IGNORE_INDEX`, so loss is applied only to the assistant answer.
+That is the key difference between "continue this text" and "answer the user".
 """
 
 from dataclasses import dataclass
@@ -38,12 +39,12 @@ ALLOWED_ROLES = {"system", "user", "assistant"}
 
 @dataclass
 class SFTExample:
-    """一条 SFT 样本。
+    """A single rendered SFT example.
 
-    prompt：
-        已经渲染好的 ChatML 上下文，末尾是 `<|assistant|>`。
-    response：
-        最后一条 assistant 的正文，后面会补 `<|end|>`，让模型学会停止。
+    prompt:
+        ChatML context ending with `<|assistant|>`.
+    response:
+        The final assistant answer plus `<|end|>`.
     """
 
     prompt: str
@@ -55,7 +56,7 @@ def _clean_text(value: Any) -> str:
 
 
 def read_sft_jsonl(path: str | Path) -> list[SFTExample]:
-    """读取 JSONL SFT 数据。"""
+    """Read and validate a JSONL SFT file."""
 
     examples: list[SFTExample] = []
     path = Path(path)
@@ -66,8 +67,8 @@ def read_sft_jsonl(path: str | Path) -> list[SFTExample]:
             if not line:
                 continue
 
-            row = json.loads(line)
-            example = row_to_sft_example(row)
+            item = json.loads(line)
+            example = row_to_sft_example(item)
             if example is None:
                 raise ValueError(f"Invalid SFT row at {path}:{line_number}")
             examples.append(example)
@@ -78,10 +79,11 @@ def read_sft_jsonl(path: str | Path) -> list[SFTExample]:
 
 
 def row_to_messages(row: dict[str, Any]) -> list[dict[str, str]] | None:
-    """把一行 JSON 标准化成 messages。
+    """Normalize one JSON row into a `messages` list.
 
-    正式流程只接受 OpenAI/GPT 风格 `messages`。
-    这样可以避免旧的自由文本格式悄悄混入 SFT，导致训练和部署模板不一致。
+    The formal workflow accepts only structured `messages`. This prevents old
+    free-form transcripts such as "用户：... 助手：..." from silently mixing
+    into SFT and teaching the model to keep writing both sides.
     """
 
     messages = row.get("messages")
@@ -101,13 +103,7 @@ def row_to_messages(row: dict[str, Any]) -> list[dict[str, str]] | None:
 
 
 def validate_messages(messages: list[dict[str, str]]) -> None:
-    """检查 messages 是否适合 SFT。
-
-    规则：
-    - system 只能出现在第一条，且最多一条。
-    - 去掉 system 后，角色必须 user/assistant 交替。
-    - 最后一条必须是 assistant，因为它是当前样本的训练目标。
-    """
+    """Validate whether a `messages` list is suitable for chat SFT."""
 
     if not messages:
         raise ValueError("messages is empty")
@@ -134,7 +130,7 @@ def validate_messages(messages: list[dict[str, str]]) -> None:
 
 
 def row_to_sft_example(row: dict[str, Any]) -> SFTExample | None:
-    """把一行 JSON 转成 ChatML prompt/response。"""
+    """Convert one JSON row into ChatML prompt and assistant response."""
 
     messages = row_to_messages(row)
     if messages is None:
@@ -142,7 +138,8 @@ def row_to_sft_example(row: dict[str, Any]) -> SFTExample | None:
 
     validate_messages(messages)
 
-    # 没有 system 时自动补一个默认 system，和真实聊天产品的做法更接近。
+    # If a row has no system message, add the deployment default. This mirrors
+    # how many chat products attach a default system instruction at runtime.
     if messages[0]["role"] != "system":
         messages = [make_system_message(DEFAULT_SYSTEM_PROMPT)] + messages
 
@@ -150,8 +147,8 @@ def row_to_sft_example(row: dict[str, Any]) -> SFTExample | None:
     response_message = messages[-1]
     prompt = render_chat_messages(prompt_messages, add_generation_prompt=True)
 
-    # response 里显式追加 <|end|>，让模型学会“这一轮助手回答结束”。
-    # 训练脚本仍会额外 add_eos=True，表示整个样本结束。
+    # The answer explicitly learns `<|end|>`, so generation can stop at the
+    # end of the current assistant turn instead of continuing with a fake user.
     response = f"{response_message['content'].strip()}\n{CHATML_END}"
     return SFTExample(prompt=prompt, response=response)
 
@@ -161,7 +158,7 @@ def split_examples(
     val_ratio: float,
     seed: int,
 ) -> tuple[list[SFTExample], list[SFTExample]]:
-    """按样本切分训练集和验证集。"""
+    """Split examples into train and validation sets."""
 
     shuffled = examples[:]
     random.Random(seed).shuffle(shuffled)
@@ -176,7 +173,7 @@ def split_examples(
 
 
 class ChatSFTDataset:
-    """把 SFT 样本转成固定长度 batch。"""
+    """Turn SFT examples into fixed-size training batches."""
 
     def __init__(
         self,
@@ -199,13 +196,13 @@ class ChatSFTDataset:
         if len(full_ids) < 2:
             full_ids = full_ids + [self.tokenizer.eos_id]
 
-        # 需要 block_size + 1 个 token 才能构造 input 和 next-token labels。
+        # Need block_size + 1 tokens to build input ids and next-token labels.
         full_ids = full_ids[: self.block_size + 1]
         input_ids = full_ids[:-1]
         labels = full_ids[1:]
 
-        # label[i] 对应 full_ids[i + 1]。
-        # 只有 target 位置进入 response 后，才参与 SFT loss。
+        # labels[i] corresponds to full_ids[i + 1]. Only targets inside the
+        # assistant response should contribute to SFT loss.
         for index in range(len(labels)):
             target_position = index + 1
             if target_position < len(prompt_ids):

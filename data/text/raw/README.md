@@ -1,97 +1,72 @@
-﻿# 训练素材说明
+# 训练素材说明
 
-这个目录放原始中文文本语料。
+这个目录放原始文本和聊天 SFT 语料。
 
-当前自带文件：
+源码中保留：
 
-- `tiny_zh_corpus.txt`：原创中文小语料，只适合跑通流程。
-- `sft_chat_zh.jsonl`：原创中文 SFT 数据，采用 OpenAI/GPT 常见的 `messages` JSONL 格式，用来模拟“用户问题 -> 助手回答”的监督微调流程。默认由 `scripts/llm/build_sft_chat_corpus.py` 生成 2000 条。
+- `tiny_zh_corpus.txt`：很小的原创中文种子文本，只用于引导流程。
+- `sft_chat_zh.jsonl`：中文 `messages` SFT 数据，用于训练聊天助手行为。
 
-可选生成文件：
+运行流程时自动生成：
 
-- `open_zh_wikipedia.txt`：通过 `scripts/llm/download_open_chinese_corpus.py` 下载的小份开源中文维基百科文本。
-- `open_zh_wikipedia.source.md`：对应语料的来源和许可说明。
+- `pretrain_zh.txt`：预训练普通文本语料，由种子文本、SFT 转写文本和合成段落组合而成。
+- `open_zh_wikipedia.txt`：可选下载的开源中文文本。
+- `sft_open_*.jsonl`：可选导入的开源 SFT 数据。
 
-## 如何加入更多语料
+这些生成文件默认不提交。
 
-你可以把更多 `.txt` 文件放到这个目录，然后在命令里传入多个 `--input`：
+## 两类语料
 
-```bash
-python scripts/llm/train_tokenizer.py --input data/text/raw/tiny_zh_corpus.txt data/text/raw/open_zh_wikipedia.txt --out artifacts/llm/tokenizer --vocab-size 8000
-python scripts/llm/prepare_data.py --input data/text/raw/tiny_zh_corpus.txt data/text/raw/open_zh_wikipedia.txt --tokenizer artifacts/llm/tokenizer/tokenizer.json --out data/text/processed --val-ratio 0.1
+预训练语料是普通 `.txt`：
+
+```text
+语言模型会根据上下文预测下一个 token。训练时，模型不断降低预测错误。
 ```
 
-聊天能力不要靠普通 `.txt` 对话转写来训练。请把聊天样本整理成下面的 `messages` JSONL，然后通过 SFT 训练。
+SFT 语料是 `messages` JSONL：
 
-## 生成更多 SFT 聊天数据
-
-默认生成 2000 条中文 SFT：
-
-```bash
-python scripts/llm/build_sft_chat_corpus.py --out data/text/raw/sft_chat_zh.jsonl --count 2000 --seed 42
+```json
+{"messages":[{"role":"system","content":"你是一个中文 AI 助手。"},{"role":"user","content":"语言模型是什么？"},{"role":"assistant","content":"语言模型会根据前文 token 预测下一个 token。"}]}
 ```
 
-可以继续放大：
+预训练让模型学会续写文本；SFT 让模型学会按用户问题回答。
+
+## 默认生成命令
+
+生成 SFT：
 
 ```bash
 python scripts/llm/build_sft_chat_corpus.py --out data/text/raw/sft_chat_zh.jsonl --count 10000 --seed 42
 ```
 
-它会覆盖日常沟通、学习解释、代码排查、写作润色、计划安排、安全边界和多轮追问。生成后一定先校验格式：
+校验 SFT：
 
 ```bash
 python scripts/llm/validate_sft_data.py --input data/text/raw/sft_chat_zh.jsonl --show-template
 ```
 
-可选导入开源英文日常对话：
+生成预训练文本：
 
 ```bash
-python scripts/llm/import_open_sft_corpus.py --source everyday --out data/text/raw/sft_open_everyday.jsonl --max-rows 2000
-python scripts/llm/validate_sft_data.py --input data/text/raw/sft_open_everyday.jsonl --show-template
+python scripts/llm/build_pretrain_corpus.py --out data/text/raw/pretrain_zh.txt --seed-text data/text/raw/tiny_zh_corpus.txt --sft-jsonl data/text/raw/sft_chat_zh.jsonl --count 8000 --max-sft-rows 10000 --seed 42
 ```
 
-开源数据使用前请查看对应数据集页面的许可和用途限制。
+一键流程 `scripts/llm/run_chat_workflow.py` 会自动执行这些步骤。
 
-## 好语料的特点
+## 加入更多真实语料
 
-- 来源合法，明确允许使用。
+可以继续加入更多 `.txt` 作为预训练语料：
+
+```bash
+python scripts/llm/train_tokenizer.py --input data/text/raw/pretrain_zh.txt data/text/raw/your_corpus.txt data/text/raw/sft_chat_zh.jsonl --out artifacts/llm/tokenizer --vocab-size 8000
+python scripts/llm/prepare_data.py --input data/text/raw/pretrain_zh.txt data/text/raw/your_corpus.txt --tokenizer artifacts/llm/tokenizer/tokenizer.json --out data/text/processed --val-ratio 0.1
+```
+
+聊天样本不要写成普通“用户：/助手：”长文本，请整理成 `messages` JSONL 后走 SFT。
+
+## 好语料标准
+
+- 来源合法，许可清楚。
 - 文本干净，乱码少，重复少。
 - 主题多样，表达自然。
 - 不包含隐私、密码、身份证号、手机号等敏感信息。
-
-坏语料会让模型学到坏习惯，例如重复、格式混乱、偏见、隐私泄漏。
-
-## SFT 聊天语料格式
-
-推荐每行使用 `messages`：
-
-```json
-{"messages":[{"role":"system","content":"你是一个中文 AI 助手。回答要准确、自然、简洁。"},{"role":"user","content":"语言模型是什么？"},{"role":"assistant","content":"语言模型会根据前文 token 预测下一个 token。"}]}
-```
-
-格式要求：
-
-- `system` 最多一条，只能放第一条。
-- 去掉 `system` 后，`user` 和 `assistant` 必须交替。
-- 最后一条必须是 `assistant`，因为它是当前样本的训练目标。
-- 不要把整段对话写成一个普通字符串；要拆成多条 role/content 消息。
-
-训练前检查格式：
-
-```bash
-python scripts/llm/validate_sft_data.py --input data/text/raw/sft_chat_zh.jsonl --show-template
-```
-
-脚本会把样本渲染成 ChatML 预览：
-
-```text
-<|system|>
-系统指令
-<|end|>
-<|user|>
-用户问题
-<|end|>
-<|assistant|>
-助手回答
-<|end|>
-```

@@ -1,135 +1,85 @@
-# LLM 从训练到部署完整工作流
+# LLM 从训练到部署完整流程
 
-这份文档把本项目的 LLM 线整理成一个真实工程的缩小版。
-
-目标不是训练出强大的商业模型，而是完整模拟工作方式：
+本项目采用标准的聊天模型训练链路：
 
 ```text
-数据准备 -> tokenizer -> 预训练 -> SFT -> 评估 -> 导出 -> HTTP 部署 -> 接口测试
+数据准备 -> tokenizer -> 预训练 base model -> SFT chat model -> 评估 -> 导出 -> HTTP 部署
 ```
 
-本流程的聊天数据采用 OpenAI/GPT 常见的 `messages` JSONL 格式，内部训练模板采用 ChatML 风格特殊 token：
+结论很明确：**正常流程是先预训练，再 SFT**。
+
+- 预训练：让模型学习通用文本分布和续写能力。
+- SFT：让模型学习 `system/user/assistant` 结构下的助手回答方式。
+- 部署：加载 SFT 后的 chat checkpoint，而不是 base checkpoint。
+
+跳过预训练直接 SFT 只适合调试代码，不适合追求正常聊天效果。
+
+## 1. 语料准备
+
+本项目有两类语料。
+
+预训练语料是普通文本：
 
 ```text
-<|system|>
-系统指令
-<|end|>
-<|user|>
-用户问题
-<|end|>
-<|assistant|>
-助手回答
-<|end|>
+data/text/raw/pretrain_zh.txt
 ```
 
-不要把新 SFT 数据和旧 checkpoint 混用。tokenizer、base checkpoint、SFT checkpoint、部署包必须属于同一条训练链路。
-
-## 0. 工作流产物
-
-完整跑完后，你会看到这些关键产物：
+SFT 语料是 `messages` JSONL：
 
 ```text
-artifacts/llm/tokenizer/tokenizer.json      # tokenizer
-data/text/processed/train.bin               # 预训练训练集 token
-data/text/processed/val.bin                 # 预训练验证集 token
-checkpoints/llm/debug/last.pt               # base checkpoint
-checkpoints/llm/sft_debug/last.pt           # chat checkpoint
-runs/llm/chat_eval.jsonl                    # 冒烟评估结果
-deployments/llm/chat_debug/                 # 部署包
-```
-
-真实项目里也会有类似边界：
-
-- `data/`：数据资产。
-- `artifacts/`：中间产物。
-- `checkpoints/`：训练产物。
-- `runs/`：实验日志和评估结果。
-- `deployments/`：可部署交付物。
-
-## 1. 准备语料
-
-预训练语料用于学习语言规律，SFT 语料用于学习助手回答方式。
-
-本仓库内置：
-
-```text
-data/text/raw/tiny_zh_corpus.txt
 data/text/raw/sft_chat_zh.jsonl
 ```
 
-默认 SFT 文件可以由脚本重建：
+生成 SFT：
 
 ```bash
-python scripts/llm/build_sft_chat_corpus.py --out data/text/raw/sft_chat_zh.jsonl --count 2000 --seed 42
+python scripts/llm/build_sft_chat_corpus.py --out data/text/raw/sft_chat_zh.jsonl --count 10000 --seed 42
 ```
 
-这会生成约 2000 条中文 `messages` 样本，覆盖：
-
-- 日常沟通：购物、做饭、通勤、睡眠、旅行、家庭沟通。
-- 学习解释：tokenizer、embedding、attention、loss、SFT、checkpoint。
-- 工程排查：CUDA、NaN、checkpoint/tokenizer 不匹配、重复生成。
-- 写作润色：通知、礼貌表达、总结改写。
-- 计划安排：学习、技术分享、训练小模型、找工作。
-- 安全边界：实时天气、医疗、金融、隐私和不确定信息。
-- 多轮上下文：至少两轮以上的追问和承接。
-
-推荐 SFT JSONL 每行长这样：
-
-```json
-{"messages":[{"role":"system","content":"你是一个中文 AI 助手。回答要准确、自然、简洁。"},{"role":"user","content":"语言模型是什么？"},{"role":"assistant","content":"语言模型会根据前文 token 预测下一个 token，并通过训练逐步降低预测错误。"}]}
-```
-
-格式要求：
-
-- `messages` 是列表。
-- `role` 只允许 `system`、`user`、`assistant`。
-- `system` 最多一条，只能放第一条。
-- 去掉 `system` 后，`user` 和 `assistant` 必须交替。
-- 每行最后一条必须是 `assistant`，因为它是 SFT 的训练目标。
-
-训练前先检查 SFT 格式：
+校验 SFT：
 
 ```bash
 python scripts/llm/validate_sft_data.py --input data/text/raw/sft_chat_zh.jsonl --show-template
 ```
 
-可选导入开源英文日常对话：
+生成预训练文本：
 
 ```bash
-python scripts/llm/import_open_sft_corpus.py --source everyday --out data/text/raw/sft_open_everyday.jsonl --max-rows 2000
-python scripts/llm/validate_sft_data.py --input data/text/raw/sft_open_everyday.jsonl --show-template
+python scripts/llm/build_pretrain_corpus.py --out data/text/raw/pretrain_zh.txt --seed-text data/text/raw/tiny_zh_corpus.txt --sft-jsonl data/text/raw/sft_chat_zh.jsonl --count 8000 --max-sft-rows 10000 --seed 42
 ```
 
-当前支持 `HuggingFaceTB/everyday-conversations-llama3.1-2k`。它的 Hugging Face 页面展示的是多轮 role/content messages，覆盖 everyday topics 和 basic science。使用前请按你的用途再次确认数据集页面的许可和限制。
-
-真实工作里，这一步还会做数据清洗、去重、敏感信息过滤、许可证检查和数据版本记录。
+`pretrain_zh.txt` 是可重建产物，默认不提交。它解决了 tiny 语料太少导致 `val.bin` token 数不足的问题。
 
 ## 2. 训练 tokenizer
 
 ```bash
-python scripts/llm/train_tokenizer.py --input data/text/raw/tiny_zh_corpus.txt data/text/raw/sft_chat_zh.jsonl --out artifacts/llm/tokenizer --vocab-size 1024 --min-frequency 1
+python scripts/llm/train_tokenizer.py --input data/text/raw/pretrain_zh.txt data/text/raw/sft_chat_zh.jsonl --out artifacts/llm/tokenizer --vocab-size 2048 --min-frequency 1
 ```
 
 验收标准：
 
 - 生成 `artifacts/llm/tokenizer/tokenizer.json`。
-- 后续预训练、SFT、生成、部署都使用同一个 tokenizer。
-- tokenizer 里包含 `<|system|>`、`<|user|>`、`<|assistant|>`、`<|end|>` 这些聊天特殊 token。
+- tokenizer 包含 `<|system|>`、`<|user|>`、`<|assistant|>`、`<|end|>`。
+- 后续预训练、SFT、评估和部署都使用同一个 tokenizer。
 
 ## 3. 准备预训练数据
 
 ```bash
-python scripts/llm/prepare_data.py --input data/text/raw/tiny_zh_corpus.txt --tokenizer artifacts/llm/tokenizer/tokenizer.json --out data/text/processed --val-ratio 0.1
+python scripts/llm/prepare_data.py --input data/text/raw/pretrain_zh.txt --tokenizer artifacts/llm/tokenizer/tokenizer.json --out data/text/processed --val-ratio 0.1
 ```
 
-验收标准：
+产物：
 
-- 生成 `data/text/processed/train.bin`。
-- 生成 `data/text/processed/val.bin`。
+```text
+data/text/processed/train.bin
+data/text/processed/val.bin
+```
 
-注意：SFT 的 JSONL 不放进预训练 bin。预训练学“文本分布”，SFT 学“助手回答”。
+这一步只使用普通 `.txt` 预训练语料。SFT 的 `messages` JSONL 不直接放进 `train.bin`。
 
 ## 4. 预训练 base model
+
+debug 配置：
 
 ```bash
 python scripts/llm/train.py --config configs/llm/debug.json
@@ -141,92 +91,111 @@ python scripts/llm/train.py --config configs/llm/debug.json
 checkpoints/llm/debug/last.pt
 ```
 
-验收标准：
-
-- train loss 能正常下降。
-- checkpoint 可以被 `generate.py` 加载。
-
-快速试生成：
+50M 档配置：
 
 ```bash
-python scripts/llm/generate.py --checkpoint checkpoints/llm/debug/last.pt --prompt "语言模型是什么？"
+python scripts/llm/train.py --config configs/llm/gpt_50m_8gb.json
 ```
 
-这个阶段的模型主要是“续写模型”，不一定像助手。
+产物：
+
+```text
+checkpoints/llm/gpt_50m_8gb/last.pt
+```
+
+base model 主要是续写模型，不应该直接作为聊天助手部署。
 
 ## 5. SFT 成 chat model
+
+debug SFT：
 
 ```bash
 python scripts/llm/train_sft.py --config configs/llm/sft_debug.json
 ```
 
-如果你导入了开源数据，可以在 `configs/llm/sft_debug.json` 里把 `sft_jsonl` 改成数组：
-
-```json
-"sft_jsonl": [
-  "data/text/raw/sft_chat_zh.jsonl",
-  "data/text/raw/sft_open_everyday.jsonl"
-]
-```
-
-SFT 的关键区别：
+它会读取：
 
 ```text
-<|system|> / <|user|> / 历史 <|assistant|>：labels = -100，不参与 loss
-最后一条 <|assistant|> 回答正文：正常计算 loss
-<|end|>：正常计算 loss，让模型学会停止当前轮回复
+checkpoints/llm/debug/last.pt
 ```
 
-这样模型不会重点学习“继续伪造用户问题”，而是学习“看到用户问题后生成助手回答”。
-
-产物：
+并输出：
 
 ```text
 checkpoints/llm/sft_debug/last.pt
 ```
 
-验收标准：
+50M 档 SFT：
 
-- SFT train loss 能跑通并下降。
-- 生成结果不会明显继续输出 `<|user|>`、`<|system|>` 等角色 token。
+```bash
+python scripts/llm/train_sft.py --config configs/llm/sft_50m_8gb.json
+```
 
-## 6. 冒烟评估
+它会读取：
+
+```text
+checkpoints/llm/gpt_50m_8gb/last.pt
+```
+
+并输出：
+
+```text
+checkpoints/llm/sft_50m_8gb/last.pt
+```
+
+SFT 的关键点：
+
+```text
+prompt 部分：labels = -100，不参与 loss
+最后 assistant 回复：参与 loss
+<|end|>：参与 loss，让模型学会停止当前轮回复
+```
+
+## 6. 评估
+
+debug：
 
 ```bash
 python scripts/llm/evaluate_chat.py --checkpoint checkpoints/llm/sft_debug/last.pt
 ```
 
-默认会测试几类固定问题，并保存：
+50M：
 
-```text
-runs/llm/chat_eval.jsonl
+```bash
+python scripts/llm/evaluate_chat.py --checkpoint checkpoints/llm/sft_50m_8gb/last.pt
 ```
 
-当前检查项很简单：
+当前评估是烟雾测试，检查：
 
-- 回答不是空的。
-- 回答里没有继续出现 `<|user|>`、`<|system|>` 等角色 token。
-- 回答没有异常过长。
+- 回复非空。
+- 没有明显泄露 `<|user|>`、`<|system|>` 等角色 token。
+- 回复长度没有异常。
 
-真实项目会继续加入人工标注评估、事实性评估、安全评估、延迟评估和成本评估。
+真实项目还应加入人工评估、事实性评估、安全评估、延迟评估和成本评估。
 
 ## 7. 导出部署包
+
+debug：
 
 ```bash
 python scripts/llm/export_model.py --checkpoint checkpoints/llm/sft_debug/last.pt --out deployments/llm/chat_debug
 ```
 
-产物：
+50M：
 
-```text
-deployments/llm/chat_debug/model.pt
-deployments/llm/chat_debug/tokenizer.json
-deployments/llm/chat_debug/manifest.json
+```bash
+python scripts/llm/export_model.py --checkpoint checkpoints/llm/sft_50m_8gb/last.pt --out deployments/llm/chat_50m_8gb
 ```
 
-部署服务只依赖这个目录，避免线上代码到处读取训练目录。
+部署包包含：
 
-## 8. 启动 HTTP 服务
+```text
+model.pt
+tokenizer.json
+manifest.json
+```
+
+## 8. 启动服务
 
 ```bash
 python scripts/llm/serve_chat.py --model-dir deployments/llm/chat_debug --host 127.0.0.1 --port 8000
@@ -246,98 +215,50 @@ curl -X POST http://127.0.0.1:8000/chat ^
   -d "{\"message\":\"语言模型是什么？\"}"
 ```
 
-返回格式：
+## 9. 一键流程
 
-```json
-{
-  "reply": "...",
-  "history": "<|system|>...\n<|user|>...\n<|assistant|>..."
-}
-```
-
-`history` 是内部 ChatML 文本，可以传回下一次请求，用来模拟多轮对话。终端或产品界面可以继续显示成“用户/助手”，但训练和服务内部统一使用 ChatML。
-
-## 9. 一键跑完整流程
-
-如果你想一次串起来：
+debug 流程：
 
 ```bash
 python scripts/llm/run_chat_workflow.py
 ```
 
-如果已经有 base checkpoint，只想重新 SFT、评估和导出：
+50M 档：
+
+```bash
+python scripts/llm/run_chat_workflow.py --pretrain-config configs/llm/gpt_50m_8gb.json --sft-config configs/llm/sft_50m_8gb.json --export-dir deployments/llm/chat_50m_8gb --vocab-size 2048
+```
+
+一键脚本会根据 `--sft-config` 的 `training.output_dir` 自动选择要评估和导出的 SFT checkpoint。
+
+复用已有 base checkpoint，只重新做 SFT：
 
 ```bash
 python scripts/llm/run_chat_workflow.py --skip-pretrain
 ```
 
-如果已经有 SFT checkpoint，只想重新评估和导出：
+复用已有 SFT checkpoint，只重新评估和导出：
 
 ```bash
 python scripts/llm/run_chat_workflow.py --skip-pretrain --skip-sft
 ```
 
-## 10. 真实项目对应关系
+注意：`--skip-pretrain` 会复用已有 tokenizer 和 base checkpoint，不会重新训练 tokenizer 或重建预训练 `.bin`。这样可以避免 checkpoint 和 tokenizer 不匹配。
 
-| 教学项目阶段 | 真实项目阶段 |
-| --- | --- |
-| `train_tokenizer.py` | tokenizer 训练或选择 |
-| `prepare_data.py` | 数据清洗、切分、打包 |
-| `train.py` | base model pretraining |
-| `train_sft.py` | supervised fine-tuning |
-| `evaluate_chat.py` | offline evaluation / smoke test |
-| `export_model.py` | model packaging |
-| `serve_chat.py` | online inference service |
-| `run_chat_workflow.py` | pipeline / CI job |
+## 10. 常见问题
 
-## 11. 下一步怎么变得更真实
+### 为什么不是直接 SFT？
 
-可以按这个顺序升级：
+可以直接 SFT，但那是从随机初始化开始学，会很不稳定，也很难得到正常聊天能力。标准流程是先预训练得到 base model，再用 SFT 对齐成 chat model。
 
-1. 增加高质量 SFT 数据，不要只靠内置样例。
-2. 把评估集单独放到 `data/text/eval/`，不要和训练集混用。
-3. 记录每次训练的配置、git commit、数据版本和指标。
-4. 加入更严格的停止条件和安全拒答样本。
-5. 用更大的中文语料预训练，再用更干净的指令数据 SFT。
-6. 部署时加入请求日志、超时、并发限制和回滚机制。
+### 为什么 debug 模型聊天质量一般？
 
-## 12. 常见问题
+debug 模型参数量很小，训练步数也少。它的目标是跑通工程链路，不是达到主流模型效果。想要更像正常助手，使用 50M 档，并继续增加真实高质量语料和训练步数。
 
-### checkpoint vocab 和 tokenizer vocab 不匹配
+### tokenizer、base checkpoint、SFT checkpoint 能混用吗？
 
-如果 SFT 时报错类似：
+不能。它们必须来自同一条训练链路。换 tokenizer 后，必须重新准备 `.bin`，重新预训练，再重新 SFT。
 
-```text
-checkpoint vocab=645, tokenizer vocab=1024
-```
+### `val.bin has 185 tokens` 怎么办？
 
-说明这个 checkpoint 不是用当前 `artifacts/llm/tokenizer/tokenizer.json` 训练出来的。
-
-真实项目里 tokenizer 是模型的一部分，不能随便替换。正确做法是：
-
-1. 固定 tokenizer。
-2. 用这个 tokenizer 准备预训练数据。
-3. 用这个 tokenizer 训练 base checkpoint。
-4. 用同一个 tokenizer 做 SFT、评估和部署。
-
-最简单的修复方式是重新跑完整流程：
-
-```bash
-python scripts/llm/run_chat_workflow.py
-```
-
-如果你只是想复用已有 checkpoint，就必须确认它和当前 tokenizer 是同一套产物。
-
-### 旧 checkpoint 用新 ChatML prompt 输出很乱
-
-如果你把旧 checkpoint 直接拿来跑新 ChatML 模板，可能会看到乱码或格式混乱。
-
-原因是旧 checkpoint 没有用包含 `<|system|>`、`<|user|>`、`<|assistant|>`、`<|end|>` 的 tokenizer 和语料训练。它并不知道这些 token 的聊天含义。
-
-正确做法：
-
-```bash
-python scripts/llm/run_chat_workflow.py
-```
-
-完整重跑后，新 tokenizer、base checkpoint、SFT checkpoint 和部署包才是一致的。
+说明预训练语料太少。先生成 `pretrain_zh.txt`，再重新运行 `prepare_data.py`。当前一键流程已经自动处理这个问题。

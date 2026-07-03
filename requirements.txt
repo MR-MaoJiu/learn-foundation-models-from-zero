@@ -1,6 +1,4 @@
-﻿torch>=2.2
+torch>=2.2
 numpy>=1.24
 tokenizers>=0.15
-tqdm>=4.66
 datasets>=2.18
-pillow>=10.0

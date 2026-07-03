@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 """
-验证 SFT JSONL 语料格式。
+Validate chat SFT JSONL data.
 
-这个脚本不训练模型，只检查数据是否适合“正常聊天模型”的 SFT：
-
-1. 每行必须是 JSON。
-2. 推荐使用 OpenAI/GPT 风格 `messages`。
-3. system 只能放第一条。
-4. user 和 assistant 必须交替。
-5. 最后一条必须是 assistant，因为它是当前样本的训练目标。
-6. 内容不能为空，且不能明显像乱码。
+This script does not train a model. It checks whether the corpus is suitable
+for normal chat-model SFT:
+1. Each non-empty line must be valid JSON.
+2. Each row must use OpenAI/GPT-style `messages`.
+3. `system` can appear only as the first message, at most once.
+4. `user` and `assistant` must alternate.
+5. The final message must be `assistant`, because it is the supervised target.
+6. Content must be non-empty and should not look like obvious mojibake.
 """
 
 import argparse
@@ -25,11 +25,25 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from foundation_models.llm.sft_data import row_to_sft_example, row_to_messages, validate_messages
 
 
-MOJIBAKE_MARKERS = ("Ã", "Â", "å", "ä", "æ", "ç", "ï¼", "ã€")
+MOJIBAKE_MARKERS = (
+    "锟",
+    "�",
+    "Ã",
+    "Â",
+    "å",
+    "æ",
+    "ç",
+    "ä",
+    "鈥",
+    "銆",
+    "绔",
+    "鍙",
+    "璇",
+)
 
 
 def looks_like_mojibake(text: str) -> bool:
-    """粗略识别 UTF-8 被错误当成其他编码读写后的乱码。"""
+    """Heuristically detect common UTF-8 decoding damage."""
 
     marker_count = sum(text.count(marker) for marker in MOJIBAKE_MARKERS)
     return marker_count >= 3
@@ -55,12 +69,12 @@ def main() -> None:
 
             total += 1
             try:
-                row = json.loads(line)
+                item = json.loads(line)
             except json.JSONDecodeError as exc:
                 errors.append(f"{line_number}: invalid JSON: {exc}")
                 continue
 
-            messages = row_to_messages(row)
+            messages = row_to_messages(item)
             if messages is None:
                 errors.append(f"{line_number}: row cannot be converted to messages")
                 continue
@@ -72,12 +86,11 @@ def main() -> None:
                 continue
 
             for index, message in enumerate(messages):
-                content = message["content"]
-                if looks_like_mojibake(content):
+                if looks_like_mojibake(message["content"]):
                     warnings.append(f"{line_number}: message {index} may contain mojibake")
 
             if args.show_template and not rendered_preview:
-                example = row_to_sft_example(row)
+                example = row_to_sft_example(item)
                 if example is not None:
                     rendered_preview = example.prompt + "\n" + example.response
 

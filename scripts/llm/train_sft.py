@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 """
-监督微调入口脚本。
+Supervised fine-tuning entry point.
 
-预训练让模型学会“续写文本”。
-SFT 让模型学会“看到用户问题后，输出助手回答”。
+Pretraining teaches the model to continue text. SFT teaches the model to read
+the chat prompt and generate only the assistant answer.
 """
 
 import argparse
@@ -27,6 +27,8 @@ from foundation_models.llm.utils import choose_device, choose_dtype, cosine_lr, 
 
 
 def estimate_loss(model: GPT, dataset: ChatSFTDataset, batch_size: int, eval_iters: int, device: torch.device) -> float:
+    """Estimate validation loss on SFT examples."""
+
     model.eval()
     losses = []
     with torch.no_grad():
@@ -40,7 +42,7 @@ def estimate_loss(model: GPT, dataset: ChatSFTDataset, batch_size: int, eval_ite
 
 
 def load_sft_examples(paths: str | list[str]) -> list[SFTExample]:
-    """读取一个或多个 SFT JSONL 文件。"""
+    """Read one or more SFT JSONL files."""
 
     if isinstance(paths, str):
         paths = [paths]

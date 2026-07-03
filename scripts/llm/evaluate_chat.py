@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 """
-聊天模型冒烟评估脚本。
+Smoke-test a chat checkpoint.
 
-真实项目上线前会有更复杂的 benchmark。
-这里先做最小版本：固定一组问题，批量生成回答，并检查明显失败模式。
+This is intentionally small. A real project would add larger benchmark sets,
+manual review, factuality checks, safety checks, latency metrics, and cost
+tracking. Here we only verify that the model can answer several common prompts
+without empty output or obvious role-token leakage.
 """
 
 import argparse
@@ -83,13 +85,13 @@ def main() -> None:
             passed = all(checks.values())
             failures += 0 if passed else 1
 
-            row = {
+            item = {
                 "prompt": prompt,
                 "reply": reply,
                 "checks": checks,
                 "passed": passed,
             }
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
             status = "PASS" if passed else "FAIL"
             print(f"[{status}] 用户：{prompt}")

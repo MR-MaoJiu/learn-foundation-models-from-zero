@@ -1,140 +1,89 @@
-# 从 0 学习基础模型
+# 从 0 到部署：小型中文聊天 LLM
 
-`learn-foundation-models-from-zero` 是一个面向初学者的基础模型学习项目。
+这个仓库只保留一条主线：**从零实现并训练一个小型中文聊天 LLM，然后完成 SFT、评估、导出和本地 HTTP 部署**。
 
-它现在包含三条学习线：
+标准流程是：
 
-- `llm`：文本语言模型，学习 tokenizer、Transformer、next-token prediction。
-- `vision`：视觉模型，学习图片张量、CNN、图像分类。
-- `multimodal`：多模态模型，学习图像编码、文本编码、图文对齐。
+```text
+准备语料 -> 训练 tokenizer -> 预训练 base model -> SFT chat model -> 评估 -> 导出 -> HTTP 部署
+```
 
-所有模块都尽量使用清晰的小模型和开源学习素材，先让你理解主线，再逐步扩大规模。
+也就是说：**先预训练，再 SFT**。预训练让模型学会续写和基本语言分布；SFT 让模型学会按照用户问题输出助手回复。跳过预训练直接 SFT 只适合测试代码链路，不适合追求正常聊天质量。
 
-## 开源训练素材
+## 当前流程
 
-默认数据源：
+`scripts/llm/run_chat_workflow.py` 会按下面顺序执行：
 
-- 文本：`wikimedia/wikipedia` 中文子集。Hugging Face 数据集卡说明 Wikipedia 原始文本使用 GFDL 和 CC BY-SA 3.0。
-- 视觉：`ylecun/mnist`。Hugging Face 数据集卡说明 MNIST 有 70,000 张 28x28 手写数字图，许可信息为 MIT Licence。
-- 多模态：使用 MNIST 图片，并由本项目根据标签生成文字描述，构造图文配对。
+1. 生成中文 `messages` SFT 数据。
+2. 校验 SFT 数据格式。
+3. 构建普通文本预训练语料 `pretrain_zh.txt`。
+4. 训练 tokenizer。
+5. 把预训练文本转换成 `train.bin` / `val.bin`。
+6. 预训练 base model。
+7. 基于 base checkpoint 做 SFT。
+8. 评估 SFT checkpoint。
+9. 导出部署包。
 
-数据源页面：
+聊天数据使用 OpenAI/GPT 常见的 `messages` JSONL 格式，内部统一渲染成 ChatML：
 
-- https://huggingface.co/datasets/wikimedia/wikipedia
-- https://huggingface.co/datasets/ylecun/mnist
+```text
+<|system|>
+系统指令
+<|end|>
+<|user|>
+用户问题
+<|end|>
+<|assistant|>
+助手回答
+<|end|>
+```
 
 ## 目录结构
 
 ```text
-learn-foundation-models-from-zero/
-├─ configs/
-│  ├─ llm/
-│  │  ├─ debug.json                  # LLM 入门调试配置：模型很小，适合先跑通流程
-│  │  └─ gpt_50m_8gb.json            # 稍大一点的 LLM 配置：理解扩展规模时参考
-│  ├─ vision/
-│  │  └─ mnist_cnn_debug.json        # 视觉 CNN 配置：训练 MNIST 手写数字分类
-│  └─ multimodal/
-│     └─ mnist_clip_debug.json       # 多模态 TinyCLIP 配置：训练 MNIST 图文对齐
-│
-├─ data/
-│  ├─ text/
-│  │  └─ raw/
-│  │     ├─ README.md                # 文本训练素材说明
-│  │     └─ tiny_zh_corpus.txt       # 内置极小中文语料，不下载也能先跑通
-│  ├─ vision/
-│  │  └─ README.md                   # 视觉训练素材说明，MNIST 会下载到这里
-│  └─ multimodal/
-│     └─ README.md                   # 多模态训练素材说明，图文对 JSONL 会生成到这里
-│
-├─ docs/
-│  ├─ README.md                      # 学习文档导航：建议先读什么、后读什么
-│  ├─ llm/
-│  │  ├─ from_zero_principles.md     # LLM 原理：token、embedding、Transformer、预测下一个 token
-│  │  └─ implementation_guide.md     # LLM 代码导读：按文件解释实现流程
-│  ├─ vision/
-│  │  ├─ from_zero_principles.md     # 视觉模型原理：图片张量、卷积、池化、分类 loss
-│  │  └─ implementation_guide.md     # 视觉代码导读：MNIST 数据、CNN、训练循环
-│  └─ multimodal/
-│     ├─ from_zero_principles.md     # 多模态原理：图片向量、文本向量、对比学习
-│     └─ implementation_guide.md     # 多模态代码导读：图文对、TinyCLIP、相似度矩阵
-│
-├─ scripts/
-│  ├─ llm/
-│  │  ├─ download_open_chinese_corpus.py  # 下载开源中文语料，保存成普通 txt
-│  │  ├─ train_tokenizer.py               # 训练 tokenizer，把文本切成 token
-│  │  ├─ prepare_data.py                  # 把文本转成 token id，并切分 train/val
-│  │  ├─ train.py                         # 训练 GPT 风格小语言模型
-│  │  ├─ generate.py                      # 加载 checkpoint，根据 prompt 生成文本
-│  │  └─ count_params.py                  # 统计 LLM 参数量，不训练
-│  ├─ vision/
-│  │  ├─ download_open_vision_dataset.py  # 下载 MNIST，并导出 PNG 图片和 labels.csv
-│  │  ├─ train_classifier.py              # 训练 CNN 手写数字分类模型
-│  │  ├─ predict_image.py                 # 用训练好的 CNN 预测单张图片
-│  │  └─ count_params.py                  # 统计视觉模型参数量，不训练
-│  └─ multimodal/
-│     ├─ build_mnist_image_text_pairs.py  # 根据 MNIST 标签生成中文描述，构造图文对
-│     ├─ train_contrastive.py             # 训练 TinyCLIP 图文对齐模型
-│     ├─ rank_texts_for_image.py          # 给一张图片，从多条文本里找最匹配的
-│     └─ count_params.py                  # 统计多模态模型参数量，不训练
-│
-├─ src/
-│  └─ foundation_models/
-│     ├─ llm/
-│     │  ├─ config.py                 # LLM 配置结构和 JSON 读取
-│     │  ├─ tokenizer.py              # tokenizer 训练和加载相关函数
-│     │  ├─ data.py                   # LLM 数据读取：把 token id 喂给模型
-│     │  ├─ model.py                  # GPT/Transformer 模型主体
-│     │  └─ utils.py                  # 随机种子、设备选择、checkpoint 保存等工具
-│     ├─ vision/
-│     │  ├─ config.py                 # 视觉模型配置结构和 JSON 读取
-│     │  ├─ data.py                   # 图片分类 Dataset：读取 PNG 和 labels.csv
-│     │  ├─ model.py                  # SmallCNN 模型结构
-│     │  └─ utils.py                  # 视觉训练用工具函数
-│     └─ multimodal/
-│        ├─ config.py                 # 多模态配置结构和 JSON 读取
-│        ├─ data.py                   # 图文对 Dataset 和字符级 tokenizer
-│        ├─ model.py                  # TinyCLIP：图片编码器、文本编码器、对比学习 loss
-│        └─ utils.py                  # 多模态训练用工具函数
-│
-├─ .gitignore
-├─ README.md
-├─ requirements-cuda.txt             # Windows + NVIDIA GPU 环境推荐，用 CUDA 版 PyTorch
-└─ requirements.txt
+configs/llm/
+  debug.json                 # debug 预训练配置
+  sft_debug.json             # debug SFT 配置
+  gpt_50m_8gb.json           # 50M 档预训练配置
+  sft_50m_8gb.json           # 50M 档 SFT 配置
+
+data/text/raw/
+  tiny_zh_corpus.txt         # 很小的种子文本
+  sft_chat_zh.jsonl          # 中文 messages SFT 数据
+  README.md                  # 数据说明
+
+scripts/llm/
+  build_pretrain_corpus.py
+  build_sft_chat_corpus.py
+  validate_sft_data.py
+  train_tokenizer.py
+  prepare_data.py
+  train.py
+  train_sft.py
+  evaluate_chat.py
+  export_model.py
+  serve_chat.py
+  run_chat_workflow.py
+
+src/foundation_models/llm/
+  tokenizer.py
+  data.py
+  model.py
+  chat.py
+  sft_data.py
+  config.py
+  utils.py
 ```
 
-你可以这样理解这些目录：
-
-- `configs/`：只放配置，不放训练逻辑。想调模型大小、学习率、batch size，优先改这里。
-- `data/`：只放训练素材和数据说明。脚本下载或生成的数据也会放在这里。
-- `docs/`：放原理和代码导读。看不懂代码时，先读这里。
-- `scripts/`：放可以直接运行的命令行脚本。它们负责“把一件事跑起来”。
-- `src/`：放真正的 Python 模块。模型结构、数据集类、工具函数都在这里。
-
-`scripts/` 和 `src/` 的区别很重要：
-
-```text
-scripts/ = 入口脚本，负责串流程，例如下载数据、训练模型、生成文本
-src/     = 可复用代码，负责具体能力，例如模型结构、数据读取、配置解析
-```
-
-举例：
-
-```text
-你运行 scripts/vision/train_classifier.py
-它会调用 src/foundation_models/vision/data.py 读取图片
-它会调用 src/foundation_models/vision/model.py 创建 CNN
-它会调用 src/foundation_models/vision/utils.py 保存模型
-```
-
-运行后会生成这些目录或文件：
+运行后会生成这些可重建产物，默认不提交：
 
 ```text
 artifacts/
 checkpoints/
+data/text/raw/pretrain_zh.txt
 data/text/processed/
-data/text/raw/open_zh_wikipedia.txt
-data/vision/mnist/
-data/multimodal/mnist_pairs/
+runs/
+deployments/
 ```
 
 ## 安装
@@ -144,15 +93,9 @@ cd learn-foundation-models-from-zero
 python -m venv .venv
 ```
 
-激活虚拟环境：
-
-```bash
-# macOS / Linux
-source .venv/bin/activate
-```
+Windows:
 
 ```bat
-:: Windows
 .venv\Scripts\activate
 ```
 
@@ -162,163 +105,106 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-如果你的系统里 `python` 命令不可用，可以把下面命令里的 `python` 换成 `python3`。
-
-如果你是 Windows + NVIDIA 显卡，推荐安装 CUDA 版 PyTorch：
+Windows + NVIDIA GPU 可以安装 CUDA 版 PyTorch：
 
 ```bash
 python -m pip install -r requirements-cuda.txt
 ```
 
-安装后可以检查 CUDA 是否可用：
+检查 CUDA：
 
 ```bash
-python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no cuda')"
+python -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"
 ```
 
-如果输出里 `torch.cuda.is_available()` 是 `True`，并且能看到显卡名称，训练脚本里的 `device: auto` 就会自动使用 CUDA。
+## 一键运行
 
-## 学习线 1：文本 LLM
-
-先读：
-
-- [docs/llm/from_zero_principles.md](docs/llm/from_zero_principles.md)
-- [docs/llm/implementation_guide.md](docs/llm/implementation_guide.md)
-- [docs/llm/full_workflow.md](docs/llm/full_workflow.md)
-
-可选下载开源中文语料：
-
-```bash
-python scripts/llm/download_open_chinese_corpus.py --out data/text/raw/open_zh_wikipedia.txt --max-docs 200
-```
-
-训练 tokenizer：
-
-```bash
-python scripts/llm/train_tokenizer.py --input data/text/raw/tiny_zh_corpus.txt data/text/raw/sft_chat_zh.jsonl --out artifacts/llm/tokenizer --vocab-size 1024 --min-frequency 1
-```
-
-`--vocab-size 1024` 表示目标词表大小。tiny 语料很小，如果不加 `--min-frequency 1`，实际训练出来的词表可能小于 1024。
-
-准备训练数据：
-
-```bash
-python scripts/llm/prepare_data.py --input data/text/raw/tiny_zh_corpus.txt --tokenizer artifacts/llm/tokenizer/tokenizer.json --out data/text/processed --val-ratio 0.1
-```
-
-训练 debug 小模型：
-
-```bash
-python scripts/llm/train.py --config configs/llm/debug.json
-```
-
-当前 LLM 配置里的上下文窗口：
-
-- `configs/llm/debug.json`：`max_seq_len = 1024`，适合学习较长上下文的完整数据流。
-- `configs/llm/gpt_50m_8gb.json`：`max_seq_len = 1024`，适合 8GB 显存显卡上学习较长上下文训练。
-
-`max_seq_len` 越大，模型一次能看到的上下文越长，但显存占用也会上升很快。因为注意力会计算 token 两两之间的关系，所以长度从 128 增加到 1024，不只是 8 倍开销，注意力部分接近 64 倍开销。
-
-生成文本：
-
-```bash
-python scripts/llm/generate.py --checkpoint checkpoints/llm/debug/last.pt --prompt "语言模型的目标是"
-```
-
-如果你想模拟真实工作里的“训练到部署”完整链路，可以运行：
+debug 流程用于快速验证代码链路：
 
 ```bash
 python scripts/llm/run_chat_workflow.py
 ```
 
-它会串起 SFT 数据校验、tokenizer、预训练、SFT、评估和导出。
-聊天 SFT 使用 OpenAI/GPT 常见的 `messages` JSONL 格式，内部训练模板使用 ChatML 风格的 `<|system|>`、`<|user|>`、`<|assistant|>`、`<|end|>` 特殊 token。
-默认会通过 [build_sft_chat_corpus.py](scripts/llm/build_sft_chat_corpus.py) 生成 2000 条中文 SFT 样本，覆盖日常沟通、学习解释、代码排查、写作润色、计划安排、安全边界和多轮上下文。
+debug 模型很小，只适合确认流程，不要期待它达到主流模型聊天质量。
 
-导出后启动本地 HTTP 服务：
+更接近真实训练的 50M 档位：
+
+```bash
+python scripts/llm/run_chat_workflow.py --pretrain-config configs/llm/gpt_50m_8gb.json --sft-config configs/llm/sft_50m_8gb.json --export-dir deployments/llm/chat_50m_8gb --vocab-size 2048
+```
+
+复用已有 SFT checkpoint，只重新评估和导出：
+
+```bash
+python scripts/llm/run_chat_workflow.py --skip-pretrain --skip-sft
+```
+
+`--skip-pretrain` 会复用已有 tokenizer 和 base checkpoint，不会重新训练 tokenizer，避免产物不匹配。
+
+## 分步运行
+
+生成 SFT 数据：
+
+```bash
+python scripts/llm/build_sft_chat_corpus.py --out data/text/raw/sft_chat_zh.jsonl --count 10000 --seed 42
+```
+
+校验 SFT：
+
+```bash
+python scripts/llm/validate_sft_data.py --input data/text/raw/sft_chat_zh.jsonl --show-template
+```
+
+构建预训练语料：
+
+```bash
+python scripts/llm/build_pretrain_corpus.py --out data/text/raw/pretrain_zh.txt --seed-text data/text/raw/tiny_zh_corpus.txt --sft-jsonl data/text/raw/sft_chat_zh.jsonl --count 8000 --max-sft-rows 10000 --seed 42
+```
+
+训练 tokenizer：
+
+```bash
+python scripts/llm/train_tokenizer.py --input data/text/raw/pretrain_zh.txt data/text/raw/sft_chat_zh.jsonl --out artifacts/llm/tokenizer --vocab-size 2048 --min-frequency 1
+```
+
+准备预训练数据：
+
+```bash
+python scripts/llm/prepare_data.py --input data/text/raw/pretrain_zh.txt --tokenizer artifacts/llm/tokenizer/tokenizer.json --out data/text/processed --val-ratio 0.1
+```
+
+预训练：
+
+```bash
+python scripts/llm/train.py --config configs/llm/debug.json
+```
+
+SFT：
+
+```bash
+python scripts/llm/train_sft.py --config configs/llm/sft_debug.json
+```
+
+评估：
+
+```bash
+python scripts/llm/evaluate_chat.py --checkpoint checkpoints/llm/sft_debug/last.pt
+```
+
+导出：
+
+```bash
+python scripts/llm/export_model.py --checkpoint checkpoints/llm/sft_debug/last.pt --out deployments/llm/chat_debug
+```
+
+启动服务：
 
 ```bash
 python scripts/llm/serve_chat.py --model-dir deployments/llm/chat_debug
 ```
 
-## 学习线 2：视觉模型
+## 详细文档
 
-先读：
-
-- [docs/vision/from_zero_principles.md](docs/vision/from_zero_principles.md)
-- [docs/vision/implementation_guide.md](docs/vision/implementation_guide.md)
-
-下载 MNIST：
-
-```bash
-python scripts/vision/download_open_vision_dataset.py --out data/vision/mnist --max-train 2000 --max-val 500
-```
-
-统计 CNN 参数：
-
-```bash
-python scripts/vision/count_params.py --config configs/vision/mnist_cnn_debug.json
-```
-
-训练 CNN：
-
-```bash
-python scripts/vision/train_classifier.py --config configs/vision/mnist_cnn_debug.json
-```
-
-预测单张图片：
-
-```bash
-python scripts/vision/predict_image.py --checkpoint checkpoints/vision/mnist_cnn_debug/last.pt --image data/vision/mnist/val/images/000000.png
-```
-
-## 学习线 3：多模态图文对齐
-
-先读：
-
-- [docs/multimodal/from_zero_principles.md](docs/multimodal/from_zero_principles.md)
-- [docs/multimodal/implementation_guide.md](docs/multimodal/implementation_guide.md)
-
-多模态模块依赖视觉模块导出的 MNIST 图片。如果还没有下载 MNIST，先运行：
-
-```bash
-python scripts/vision/download_open_vision_dataset.py --out data/vision/mnist --max-train 2000 --max-val 500
-```
-
-构建 MNIST 图文配对：
-
-```bash
-python scripts/multimodal/build_mnist_image_text_pairs.py --mnist-dir data/vision/mnist --out data/multimodal/mnist_pairs
-```
-
-统计 TinyCLIP 参数：
-
-```bash
-python scripts/multimodal/count_params.py --config configs/multimodal/mnist_clip_debug.json
-```
-
-训练图文对齐模型：
-
-```bash
-python scripts/multimodal/train_contrastive.py --config configs/multimodal/mnist_clip_debug.json
-```
-
-给图片匹配文本：
-
-```bash
-python scripts/multimodal/rank_texts_for_image.py --checkpoint checkpoints/multimodal/mnist_clip_debug/last.pt --image data/vision/mnist/val/images/000000.png --texts "这是一张数字 0 的手写图片。" "这是一张数字 7 的手写图片。"
-```
-
-## 总学习顺序
-
-建议先这样走：
-
-1. 文本 LLM：理解 token、Transformer、next-token loss。
-2. 视觉 CNN：理解图片张量、卷积、分类 loss。
-3. 多模态 TinyCLIP：理解图像向量、文本向量、对比学习。
-
-总主线：
-
-```text
-单模态表示学习 -> 跨模态表示对齐 -> 更大的基础模型
-```
+- [LLM 原理](docs/llm/from_zero_principles.md)
+- [代码导读](docs/llm/implementation_guide.md)
+- [完整训练到部署流程](docs/llm/full_workflow.md)

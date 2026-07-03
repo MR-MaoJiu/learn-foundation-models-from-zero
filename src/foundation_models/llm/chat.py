@@ -1,30 +1,17 @@
 from __future__ import annotations
 
 """
-聊天模板和推理工具。
+Chat template and inference helpers.
 
-本项目内部使用一个 ChatML 风格模板来模拟主流聊天模型的输入格式。
-外部数据仍然使用 OpenAI/GPT 常见的 `messages` JSON 结构：
+External data uses OpenAI/GPT-style `messages` dictionaries:
 
     {"role": "system", "content": "..."}
     {"role": "user", "content": "..."}
     {"role": "assistant", "content": "..."}
 
-进入模型前会被渲染成：
-
-    <|system|>
-    你是一个...
-    <|end|>
-    <|user|>
-    问题
-    <|end|>
-    <|assistant|>
-
-这样做比直接写“用户：/助手：”更接近主流模型训练方式：
-
-1. 角色边界稳定，不容易和正文混淆。
-2. tokenizer 可以把角色标记注册成单独 special token。
-3. 生成时遇到 <|end|> 就能停止当前轮回复。
+Before the text enters the model, messages are rendered into a compact ChatML
+format with explicit role tokens. This keeps training, evaluation, generation,
+and deployment on the same prompt format.
 """
 
 from pathlib import Path
@@ -44,7 +31,6 @@ CHATML_END = "<|end|>"
 
 DEFAULT_SYSTEM_PROMPT = "你是一个中文 AI 助手。回答要准确、自然、简洁；不知道实时信息时要说明限制。"
 
-# 生成时如果模型开始输出下一条角色 token，说明当前助手轮次应该结束。
 DEFAULT_CHAT_STOPS = (
     CHATML_END,
     CHATML_USER,
@@ -56,29 +42,25 @@ DEFAULT_CHAT_STOPS = (
 
 
 def make_system_message(content: str = DEFAULT_SYSTEM_PROMPT) -> dict[str, str]:
-    """创建 system 消息。
-
-    system 消息告诉模型“你是谁、应该怎么回答”。真实聊天模型通常都会有
-    system/developer 层级的指令；教学项目里先保留一个简单 system。
-    """
+    """Create a system message."""
 
     return {"role": "system", "content": content}
 
 
 def make_user_message(content: str) -> dict[str, str]:
-    """创建 user 消息。"""
+    """Create a user message."""
 
     return {"role": "user", "content": content}
 
 
 def make_assistant_message(content: str) -> dict[str, str]:
-    """创建 assistant 消息。"""
+    """Create an assistant message."""
 
     return {"role": "assistant", "content": content}
 
 
 def role_to_token(role: str) -> str:
-    """把 messages 里的 role 转成 ChatML token。"""
+    """Map a `messages` role to its ChatML token."""
 
     if role == "system":
         return CHATML_SYSTEM
@@ -93,15 +75,7 @@ def render_chat_messages(
     messages: list[dict[str, str]],
     add_generation_prompt: bool,
 ) -> str:
-    """把 OpenAI/GPT 风格 messages 渲染成模型输入文本。
-
-    参数：
-    - messages：形如 [{"role": "user", "content": "..."}] 的消息列表。
-    - add_generation_prompt：是否在末尾追加 `<|assistant|>`。
-
-    SFT 构造 prompt 时会打开 `add_generation_prompt`，让模型从 assistant
-    角色开始生成；构造完整训练文本时 assistant 回复内容会放在它后面。
-    """
+    """Render OpenAI/GPT-style messages into ChatML text."""
 
     parts: list[str] = []
     for message in messages:
@@ -109,9 +83,6 @@ def render_chat_messages(
         content = str(message["content"]).strip()
         if not content:
             continue
-
-        # 每条消息都用“角色 token + 内容 + <|end|>”包起来。
-        # <|end|> 是明确的消息边界，生成时也可以作为停止标记。
         parts.append(f"{role_to_token(role)}\n{content}\n{CHATML_END}")
 
     if add_generation_prompt:
@@ -121,15 +92,14 @@ def render_chat_messages(
 
 
 def build_chat_prompt(prompt: str, system_prompt: str = DEFAULT_SYSTEM_PROMPT) -> str:
-    """把普通用户输入整理成 ChatML 推理 prompt。"""
+    """Wrap a plain user prompt as a ChatML generation prompt."""
 
-    prompt = prompt.strip()
-    messages = [make_system_message(system_prompt), make_user_message(prompt)]
+    messages = [make_system_message(system_prompt), make_user_message(prompt.strip())]
     return render_chat_messages(messages, add_generation_prompt=True)
 
 
 def trim_assistant_reply(text: str, prompt_text: str) -> str:
-    """从完整生成文本中截取助手当前这一轮回复。"""
+    """Extract the current assistant turn from the full generated text."""
 
     if text.startswith(prompt_text):
         reply = text[len(prompt_text) :]
@@ -153,7 +123,7 @@ def load_chat_model(
     device: torch.device,
     tokenizer_path: str | Path | None = None,
 ) -> tuple[GPT, LLMTokenizer, dict[str, Any]]:
-    """加载 checkpoint、tokenizer 和模型。"""
+    """Load checkpoint, tokenizer, and model."""
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
     raw_config = checkpoint["config"]
@@ -169,7 +139,7 @@ def load_chat_model(
 
 
 def chat_stop_token_ids(tokenizer: LLMTokenizer) -> set[int]:
-    """返回聊天生成时应该提前停止的 token id。"""
+    """Return token ids that should stop current-turn chat generation."""
 
     ids = {tokenizer.eos_id}
     if tokenizer.chat_end_id is not None:
@@ -187,7 +157,7 @@ def generate_text(
     top_k: int = 50,
     stop_token_ids: set[int] | None = None,
 ) -> str:
-    """执行一次自回归生成，并返回完整文本。"""
+    """Run autoregressive generation and return the full decoded text."""
 
     input_ids = tokenizer.encode(prompt_text, add_bos=True)
     x = torch.tensor([input_ids], dtype=torch.long, device=device)
@@ -202,9 +172,6 @@ def generate_text(
         )
 
     text = tokenizer.decode(output[0].tolist(), skip_special_tokens=False)
-
-    # 生成时我们在最前面加了 <bos>，但 ChatML prompt 本身不包含它。
-    # 去掉它以后，`trim_assistant_reply` 才能直接用 prompt 前缀截断。
     if text.startswith("<bos>"):
         text = text[len("<bos>") :].lstrip()
     return text
@@ -220,11 +187,7 @@ def generate_chat_reply(
     top_k: int = 50,
     history: str = "",
 ) -> tuple[str, str]:
-    """生成一轮助手回复，并返回 `(reply, new_history)`。
-
-    `history` 是内部 ChatML 文本。HTTP 服务会把它回传给调用方，下一轮请求
-    再带回来，就能模拟多轮对话。
-    """
+    """Generate one assistant reply and return `(reply, new_history)`."""
 
     if history:
         prompt_text = f"{history}\n{CHATML_USER}\n{user_text.strip()}\n{CHATML_END}\n{CHATML_ASSISTANT}"

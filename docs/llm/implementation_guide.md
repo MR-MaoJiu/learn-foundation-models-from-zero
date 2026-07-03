@@ -199,3 +199,21 @@ RoPE 的辅助函数，把 `[a, b]` 变成 `[-b, a]`，用于构造旋转。
 限制总字符数。默认 0 表示不限制。
 
 脚本会额外生成一个 `.source.md` 文件，用来记录数据来源、子集、写入数量和许可提醒。
+
+## `scripts/llm/build_pretrain_corpus.py`
+
+这个脚本用来构建默认预训练文本 `data/text/raw/pretrain_zh.txt`。
+
+它会组合三类内容：
+
+1. `tiny_zh_corpus.txt` 里的原创种子文本。
+2. `sft_chat_zh.jsonl` 转写出的可读对话文本。
+3. 合成的中文技术和日常段落。
+
+这样做是为了避免 tiny 语料太少，导致 `val.bin` token 数小于 `max_seq_len`。它仍然是教学语料，不是高质量真实预训练数据的替代品。
+
+## `scripts/llm/build_sft_chat_corpus.py`
+
+这个脚本生成中文 `messages` JSONL，用于 SFT。
+
+新版生成器会高频覆盖天气、语言模型、tokenizer、部署检查、模型续写用户、CUDA、NaN、睡眠、写作和任务规划等常见问题。每条样本都保持 `system/user/assistant` 结构，避免模型学习旧式“用户：/助手：”全文续写。

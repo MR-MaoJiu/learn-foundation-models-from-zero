@@ -9,12 +9,10 @@ artifacts/
 checkpoints/
 deployments/
 data/text/processed/
-data/text/raw/daily_life_dialogue.txt
-data/text/raw/daily_life_dialogue.source.md
+data/text/raw/pretrain_zh.txt
 data/text/raw/open_zh_wikipedia.txt
 data/text/raw/open_zh_wikipedia.source.md
-data/vision/mnist/
-data/multimodal/mnist_pairs/
+data/text/raw/sft_open_*.jsonl
 
 # Large model/data files.
 *.bin

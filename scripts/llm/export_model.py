@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 """
-导出部署包。
+Export a checkpoint into a deployable directory.
 
-训练 checkpoint 往往散落在 checkpoints/ 下。
-部署时更希望得到一个完整目录：
+Training checkpoints live under `checkpoints/`. Deployment should use a compact
+package that contains exactly what the inference service needs:
 
     deployments/llm/chat_debug/
-    ├─ model.pt
-    ├─ tokenizer.json
-    └─ manifest.json
+    - model.pt
+    - tokenizer.json
+    - manifest.json
 """
 
 import argparse

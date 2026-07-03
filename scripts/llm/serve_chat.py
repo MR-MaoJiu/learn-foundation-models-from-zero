@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 """
-本地聊天 HTTP 服务。
+Local HTTP chat service.
 
-这是一个最小部署模拟：
+This is a minimal deployment simulation built with Python's standard library:
 
     GET  /health
     POST /chat {"message": "...", "history": ""}
 
-它使用 Python 标准库实现，避免为教学项目额外引入 Web 框架依赖。
+The service loads an exported deployment package created by `export_model.py`.
 """
 
 import argparse
@@ -83,13 +83,7 @@ class ChatHandler(BaseHTTPRequestHandler):
             top_k=int(payload.get("top_k", defaults["top_k"])),
         )
 
-        self.send_json(
-            200,
-            {
-                "reply": reply,
-                "history": history,
-            },
-        )
+        self.send_json(200, {"reply": reply, "history": history})
 
 
 def load_manifest(model_dir: Path) -> dict[str, Any]:
